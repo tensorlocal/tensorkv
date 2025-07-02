@@ -1,1 +1,264 @@
 package vamana
+
+import (
+	"container/heap"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"log"
+	"math"
+	"os"
+	"sort"
+	"sync"
+)
+
+type DiskANN struct {
+	indexPath         string
+	fileHandle        *os.File
+	MedoidID          int
+	MaxDegree         int
+	VectorDim         int
+	nodeBlockSize     int64
+	quantizer         Quantizer
+	compressedVectors [][]byte
+	lock              sync.RWMutex
+}
+
+func NewDiskANN(indexPath string, maxDegree, vectorDim int, quantizer Quantizer) (*DiskANN, error) {
+
+	// FullVector (float64 = 8 bytes) + Neighbors (int = 4 bytes)
+
+	nodeBlockSize := int64(vectorDim*8 + maxDegree*4)
+
+	return &DiskANN{
+		indexPath:     indexPath,
+		MaxDegree:     maxDegree,
+		VectorDim:     vectorDim,
+		nodeBlockSize: nodeBlockSize,
+		quantizer:     quantizer,
+	}, nil
+}
+
+func (da *DiskANN) Build(vectors [][]float64, alpha float64, l int, k int) error {
+	n := len(vectors)
+	if n == 0 {
+		return fmt.Errorf("cannot build index with zero vectors")
+	}
+
+	log.Println("Starting DiskANN build process...")
+
+	log.Printf("Running K-Means with k=%d...", k)
+	centroids, assignments := KMeans(vectors, k)
+	overlappingAssignments := assignToLNearest(vectors, centroids, l) // 创建重叠分片 [cite: 153]
+
+	log.Println("Building Vamana graph for each shard...")
+	allEdges := make(map[int]map[int]struct{}) // 使用 map 来存储全局的边关系
+	for i := range centroids {
+		shardVectors := make(map[int][]float64)
+		for _, pointIndex := range overlappingAssignments[i] {
+			shardVectors[pointIndex] = vectors[pointIndex]
+		}
+
+		shardGraph := BuildVamanaGraphForShard(shardVectors, alpha, da.MaxDegree)
+
+		for _, node := range shardGraph.Nodes {
+			if _, ok := allEdges[node.ID]; !ok {
+				allEdges[node.ID] = make(map[int]struct{})
+			}
+			for _, neighborID := range node.OutEdges {
+				allEdges[node.ID][neighborID] = struct{}{}
+			}
+		}
+		log.Printf("Finished shard %d/%d", i+1, k)
+	}
+
+	log.Println("Writing final graph structure to disk...")
+	da.MedoidID = computeMedoid(vectors)
+	err := da.writeGraphToDisk(vectors, allEdges)
+	if err != nil {
+		return err
+	}
+
+	// 4. 训练量化器并生成所有向量的压缩版本
+	log.Println("Training quantizer and compressing vectors...")
+	da.quantizer.Train(vectors)
+	da.compressedVectors = make([][]byte, n)
+	for i := range vectors {
+		da.compressedVectors[i] = da.quantizer.Compress(vectors[i])
+	}
+
+	log.Println("DiskANN build completed successfully.")
+	return nil
+}
+
+func (da *DiskANN) Search(query []float64, k int, L int, beamWidth int) ([]int, error) {
+	da.lock.RLock()
+	defer da.lock.RUnlock()
+
+	if da.fileHandle == nil {
+		var err error
+		da.fileHandle, err = os.OpenFile(da.indexPath, os.O_RDONLY, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open index file: %w", err)
+		}
+	}
+
+	// 优先队列存储候选者，距离使用近似距离计算
+	candidates := &priorityQueue{}
+	heap.Init(candidates)
+
+	// 结果集，使用精确距离排序
+	results := &priorityQueue{}
+	heap.Init(results)
+
+	visited := make(map[int]struct{})
+
+	// 从 Medoid 开始搜索
+	startID := da.MedoidID
+	visited[startID] = struct{}{}
+	approxDist := da.quantizer.ApproximateDistance(query, da.compressedVectors[startID])
+	heap.Push(candidates, &candidate{id: startID, dist: approxDist})
+
+	for candidates.Len() > 0 {
+		// 检查终止条件：如果候选队列中最近的点比结果队列中最远的点还要远，可以提前终止
+		if results.Len() >= L {
+			farthestResultDist := (*results)[0].dist // Max-heap behavior simulated on min-heap
+			closestCandidateDist, err := da.getPreciseDist(query, (*candidates)[0].id)
+			if err != nil {
+				return nil, err
+			}
+			if closestCandidateDist > farthestResultDist {
+				break
+			}
+		}
+
+		var beam []*candidate
+		for i := 0; i < beamWidth && candidates.Len() > 0; i++ {
+			beam = append(beam, heap.Pop(candidates).(*candidate))
+		}
+
+		// 从磁盘批量读取这些节点的数据
+		fullNodes, err := da.readNodesFromDisk(beam)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, node := range fullNodes {
+			preciseDist := euclideanDistance(query, node.Vector)
+			heap.Push(results, &candidate{id: node.ID, dist: preciseDist})
+			// 保持结果集大小不超过L
+			if results.Len() > L {
+				heap.Pop(results)
+			}
+
+			for _, neighborID := range node.OutEdges {
+				if _, exists := visited[neighborID]; !exists {
+					visited[neighborID] = struct{}{}
+					approxDist := da.quantizer.ApproximateDistance(query, da.compressedVectors[neighborID])
+					heap.Push(candidates, &candidate{id: neighborID, dist: approxDist})
+				}
+			}
+		}
+	}
+
+	// 返回最终排好序的 top-k 结果
+	finalResults := make([]int, 0, k)
+	sort.Slice(results, func(i, j int) bool { return (*results)[i].dist < (*results)[j].dist })
+	for i := 0; i < k && i < results.Len(); i++ {
+		finalResults = append(finalResults, (*results)[i].id)
+	}
+
+	return finalResults, nil
+}
+
+func (da *DiskANN) writeGraphToDisk(vectors [][]float64, allEdges map[int]map[int]struct{}) error {
+	file, err := os.Create(da.indexPath)
+	if err != nil {
+		return fmt.Errorf("failed to create index file: %w", err)
+	}
+	defer file.Close()
+
+	for i, vec := range vectors {
+		offset := int64(i) * da.nodeBlockSize
+		file.Seek(offset, io.SeekStart)
+
+		// 写入全精度向量
+		buf := make([]byte, da.VectorDim*8)
+		for j, val := range vec {
+			binary.LittleEndian.PutUint64(buf[j*8:], math.Float64bits(val))
+		}
+		_, err := file.Write(buf)
+		if err != nil {
+			return err
+		}
+
+		neighbors := make([]int32, da.MaxDegree)
+
+		nodeEdges, ok := allEdges[i]
+		if ok {
+			idx := 0
+			for neighborID := range nodeEdges {
+				if idx >= da.MaxDegree {
+					break
+				}
+				neighbors[idx] = int32(neighborID)
+				idx++
+			}
+		}
+
+		neighborBuf := make([]byte, da.MaxDegree*4)
+		for j, id := range neighbors {
+			binary.LittleEndian.PutUint32(neighborBuf[j*4:], uint32(id))
+		}
+		_, err = file.Write(neighborBuf)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (da *DiskANN) readNodesFromDisk(nodesToRead []*candidate) ([]*Node, error) {
+	fullNodes := make([]*Node, 0, len(nodesToRead))
+	buf := make([]byte, da.nodeBlockSize)
+
+	for _, c := range nodesToRead {
+		offset := int64(c.id) * da.nodeBlockSize
+		_, err := da.fileHandle.ReadAt(buf, offset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read node %d: %w", c.id, err)
+		}
+
+		// 解析全精度向量
+		vec := make([]float64, da.VectorDim)
+		for i := 0; i < da.VectorDim; i++ {
+			bits := binary.LittleEndian.Uint64(buf[i*8 : (i+1)*8])
+			vec[i] = math.Float64frombits(bits)
+		}
+
+		// 解析邻居列表
+		edges := make([]int, 0, da.MaxDegree)
+		edgeOffset := da.VectorDim * 8
+		for i := 0; i < da.MaxDegree; i++ {
+			id := int(binary.LittleEndian.Uint32(buf[edgeOffset+i*4 : edgeOffset+(i+1)*4]))
+			if id != 0 { // 假设 0 是 padding 值
+				edges = append(edges, id)
+			}
+		}
+
+		fullNodes = append(fullNodes, &Node{
+			ID:       c.id,
+			Vector:   vec,
+			OutEdges: edges,
+		})
+	}
+	return fullNodes, nil
+}
+
+func (da *DiskANN) getPreciseDist(query []float64, nodeID int) (float64, error) {
+	nodes, err := da.readNodesFromDisk([]*candidate{{id: nodeID}})
+	if err != nil {
+		return 0, err
+	}
+	return euclideanDistance(query, nodes[0].Vector), nil
+}
