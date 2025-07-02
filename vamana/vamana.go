@@ -13,6 +13,7 @@ const (
 	DefaultL          = 100
 	DefaultMaxDegree  = 64
 	ConstructionAlpha = 1.0
+	DefaultBeamWidth  = 4
 )
 
 type Graph struct {
@@ -75,7 +76,7 @@ func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int, vect
 	})
 
 	pruned := make([]int, 0, maxDegree)
-	pruned = append(pruned, candidates[0].ID) // 保留最近邻
+	pruned = append(pruned, candidates[0].ID)
 
 	maxAllowedDist := float64(math.MaxFloat32)
 	if alpha > 1 {
@@ -120,7 +121,6 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) []int {
 	candidates := make(priorityQueue, 0)
 	heap.Init(&candidates)
 
-	// 从图结构中获取起始节点
 	startNode := graph.Nodes[startID]
 	initialDist := euclideanDistance(startNode.Vector, target)
 	heap.Push(&candidates, &candidate{id: startID, dist: initialDist})
@@ -136,7 +136,7 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) []int {
 		result = append(result, current.id)
 
 		currentNode := graph.Nodes[current.id]
-		for _, neighborID := range currentNode.OutEdges { // 正确访问图的出边
+		for _, neighborID := range currentNode.OutEdges {
 			if _, exists := visited[neighborID]; !exists {
 				neighborNode := graph.Nodes[neighborID]
 				dist := euclideanDistance(neighborNode.Vector, target)
@@ -154,14 +154,12 @@ func BuildVamanaGraph(vectors [][]float64, alpha float64, maxDegree int) *Graph 
 		return nil
 	}
 
-	// 初始化图结构
 	graph := &Graph{
 		Nodes:     make([]*Node, n),
 		Alpha:     alpha,
 		MaxDegree: maxDegree,
 	}
 
-	// 初始化节点
 	for i := range vectors {
 		graph.Nodes[i] = &Node{
 			ID:       i,
@@ -170,54 +168,44 @@ func BuildVamanaGraph(vectors [][]float64, alpha float64, maxDegree int) *Graph 
 		}
 	}
 
-	// 计算Medoid
 	if n == 1 {
-		graph.MedoidID = 0 // 单节点时直接设置为 0
-		return graph       // 单节点情况直接返回，无需构建边
+		graph.MedoidID = 0
+		return graph
 	} else {
 		graph.MedoidID = computeMedoid(vectors)
 	}
 
-	// 两阶段构建
 	for pass := 0; pass < 2; pass++ {
 		currentAlpha := ConstructionAlpha
 		if pass == 1 {
 			currentAlpha = alpha
 		}
 
-		// 随机遍历顺序
 		order := rand.Perm(n)
 		for _, i := range order {
 			node := graph.Nodes[i]
 
-			// 执行贪婪搜索获取访问路径
 			visitedIDs := GreedySearch(graph, graph.MedoidID, node.Vector, DefaultL)
 
-			// 收集候选节点
 			candidates := make([]*Node, 0, len(visitedIDs))
 			for _, id := range visitedIDs {
-				if id != i { // 不包括节点自身
+				if id != i {
 					candidates = append(candidates, graph.Nodes[id])
 				}
 			}
 
-			// 如果没有候选节点，至少添加medoid作为候选
 			if len(candidates) == 0 && i != graph.MedoidID {
 				candidates = append(candidates, graph.Nodes[graph.MedoidID])
 			}
 
-			// 执行RobustPrune
 			newEdges := RobustPrune(node, candidates, currentAlpha, maxDegree, vectors)
 
-			// 更新出边
 			graph.lock.Lock()
 			node.OutEdges = newEdges
 
-			// 添加反向边并处理度数限制
 			for _, neighborID := range newEdges {
 				neighbor := graph.Nodes[neighborID]
 
-				// 检查是否已经有这条边，避免重复添加
 				hasEdge := false
 				for _, e := range neighbor.OutEdges {
 					if e == node.ID {
@@ -231,7 +219,6 @@ func BuildVamanaGraph(vectors [][]float64, alpha float64, maxDegree int) *Graph 
 				}
 
 				if len(neighbor.OutEdges) > maxDegree {
-					// 对邻居执行度数修剪
 					neighborCandidates := make([]*Node, 0, len(neighbor.OutEdges))
 					for _, e := range neighbor.OutEdges {
 						neighborCandidates = append(neighborCandidates, graph.Nodes[e])
@@ -243,19 +230,16 @@ func BuildVamanaGraph(vectors [][]float64, alpha float64, maxDegree int) *Graph 
 		}
 	}
 
-	// 检查图的连通性，确保所有节点都可从medoid到达
 	ensureConnectivity(graph, vectors)
 
 	return graph
 }
 
-// 确保图的连通性
 func ensureConnectivity(graph *Graph, vectors [][]float64) {
 	visited := make([]bool, len(graph.Nodes))
 	queue := []int{graph.MedoidID}
 	visited[graph.MedoidID] = true
 
-	// 广度优先搜索标记可到达节点
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
@@ -268,10 +252,8 @@ func ensureConnectivity(graph *Graph, vectors [][]float64) {
 		}
 	}
 
-	// 连接未访问节点到已访问的最近节点
 	for i, isVisited := range visited {
 		if !isVisited {
-			// 找到最近的已访问节点
 			minDist := float64(math.MaxFloat64)
 			closestVisited := -1
 
@@ -294,7 +276,6 @@ func ensureConnectivity(graph *Graph, vectors [][]float64) {
 	}
 }
 
-// 辅助函数：生成随机初始边
 func randomEdges(totalNodes, numEdges int) []int {
 	edges := make([]int, 0, numEdges)
 	for i := 0; i < numEdges; i++ {
@@ -303,12 +284,10 @@ func randomEdges(totalNodes, numEdges int) []int {
 	return edges
 }
 
-// 辅助函数：计算Medoid节点
 func computeMedoid(vectors [][]float64) int {
 	type pair struct{ i, j int }
 	distChan := make(chan float64, len(vectors)*(len(vectors)-1)/2)
 
-	// 并行计算所有pair距离
 	var wg sync.WaitGroup
 	for i := 0; i < len(vectors); i++ {
 		for j := i + 1; j < len(vectors); j++ {
@@ -342,4 +321,102 @@ func computeMedoid(vectors [][]float64) int {
 		}
 	}
 	return medoid
+}
+
+func BuildVamanaGraphForShard(shardVectors map[int][]float64, alpha float64, maxDegree int) *Graph {
+	n := len(shardVectors)
+	if n == 0 {
+		return nil
+	}
+
+	// Remap original IDs to local 0-based indices for in-memory processing
+	localIDToOrigID := make([]int, 0, n)
+	origIDToLocalID := make(map[int]int)
+	vectors := make([][]float64, 0, n)
+
+	i := 0
+	for origID, vec := range shardVectors {
+		localIDToOrigID = append(localIDToOrigID, origID)
+		origIDToLocalID[origID] = i
+		vectors = append(vectors, vec)
+		i++
+	}
+
+	graph := &Graph{
+		Nodes:     make([]*Node, n),
+		Alpha:     alpha,
+		MaxDegree: maxDegree,
+	}
+
+	for i := range vectors {
+		graph.Nodes[i] = &Node{ID: i, Vector: vectors[i], OutEdges: make([]int, 0)}
+	}
+
+	if n > 1 {
+		graph.MedoidID = computeMedoid(vectors) // Medoid is local
+		// Initialize with random edges
+		for _, node := range graph.Nodes {
+			for j := 0; j < 5 && j < n; j++ { // Simple random init
+				randNeighbor := rand.Intn(n)
+				if randNeighbor != node.ID {
+					node.OutEdges = append(node.OutEdges, randNeighbor)
+				}
+			}
+		}
+	} else {
+		graph.MedoidID = 0
+	}
+
+	for pass := 0; pass < 2; pass++ {
+		currentAlpha := ConstructionAlpha
+		if pass == 1 {
+			currentAlpha = alpha
+		}
+
+		order := rand.Perm(n)
+		for _, localID := range order {
+			node := graph.Nodes[localID]
+			_, visitedNodes := GreedySearch(graph, graph.MedoidID, node.Vector, DefaultL)
+
+			// Prune candidates
+			newEdgesLocal := RobustPrune(node, visitedNodes, currentAlpha, maxDegree)
+			node.OutEdges = newEdgesLocal
+
+			// Add reciprocal edges
+			for _, neighborLocalID := range newEdgesLocal {
+				neighbor := graph.Nodes[neighborLocalID]
+				// Add edge if not present and within degree bounds
+				hasEdge := false
+				for _, e := range neighbor.OutEdges {
+					if e == localID {
+						hasEdge = true
+						break
+					}
+				}
+				if !hasEdge {
+					neighbor.OutEdges = append(neighbor.OutEdges, localID)
+					if len(neighbor.OutEdges) > maxDegree {
+						// Prune neighbor's edges
+						neighborCandidates := make([]*Node, 0, len(neighbor.OutEdges))
+						for _, e := range neighbor.OutEdges {
+							neighborCandidates = append(neighborCandidates, graph.Nodes[e])
+						}
+						neighbor.OutEdges = RobustPrune(neighbor, neighborCandidates, currentAlpha, maxDegree)
+					}
+				}
+			}
+		}
+	}
+
+	finalGraph := &Graph{Nodes: make([]*Node, n), MaxDegree: maxDegree}
+	for i, node := range graph.Nodes {
+		origID := localIDToOrigID[i]
+		origEdges := make([]int, len(node.OutEdges))
+		for j, localEdge := range node.OutEdges {
+			origEdges[j] = localIDToOrigID[localEdge]
+		}
+		finalGraph.Nodes[i] = &Node{ID: origID, Vector: node.Vector, OutEdges: origEdges}
+	}
+
+	return finalGraph
 }

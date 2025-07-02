@@ -91,6 +91,7 @@ func TestGreedySearch(t *testing.T) {
 		result := GreedySearch(graph, 0, []float64{3, 0}, 2)
 		assert.Equal(t, 2, len(result))
 	})
+
 }
 
 func TestBuildVamanaGraph(t *testing.T) {
