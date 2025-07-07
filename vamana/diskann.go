@@ -48,7 +48,7 @@ func (da *DiskANN) Build(vectors [][]float64, alpha float64, l int, k int) error
 	log.Println("Starting DiskANN build process...")
 
 	log.Printf("Running K-Means with k=%d...", k)
-	centroids, assignments := KMeans(vectors, k)
+	centroids := KMeans(vectors, k, 25)
 	overlappingAssignments := assignToLNearest(vectors, centroids, l) // 创建重叠分片 [cite: 153]
 
 	log.Println("Building Vamana graph for each shard...")
@@ -163,7 +163,10 @@ func (da *DiskANN) Search(query []float64, k int, L int, beamWidth int) ([]int, 
 
 	// 返回最终排好序的 top-k 结果
 	finalResults := make([]int, 0, k)
-	sort.Slice(results, func(i, j int) bool { return (*results)[i].dist < (*results)[j].dist })
+	fmt.Println("res: ", (*results), (*results)[0].dist)
+	sort.Slice(*results, func(i, j int) bool {
+		return (*results)[i].dist < (*results)[j].dist // 直接访问切片元素
+	})
 	for i := 0; i < k && i < results.Len(); i++ {
 		finalResults = append(finalResults, (*results)[i].id)
 	}
