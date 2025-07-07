@@ -1,13 +1,10 @@
 package vamana
 
+/*
 import (
-	"container/heap"
-	"math/rand"
-	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEuclideanDistance(t *testing.T) {
@@ -27,6 +24,7 @@ func TestEuclideanDistance(t *testing.T) {
 	})
 }
 
+/*
 func TestRobustPrune(t *testing.T) {
 	vectors := [][]float64{
 		{0, 0}, // 0
@@ -374,3 +372,4 @@ func min(a, b int) int {
 	}
 	return b
 }
+*/

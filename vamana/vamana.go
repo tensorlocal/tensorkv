@@ -65,89 +65,117 @@ func euclideanDistance(a, b []float64) float64 {
 	return sum
 }
 
-func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int, vectors [][]float64) []int {
+func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []int {
 	if len(candidates) == 0 {
 		return nil
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		return euclideanDistance(p.Vector, candidates[i].Vector) <
-			euclideanDistance(p.Vector, candidates[j].Vector)
+	// Create a copy to avoid modifying the original slice of candidates
+	sortedCandidates := make([]*Node, len(candidates))
+	copy(sortedCandidates, candidates)
+
+	sort.Slice(sortedCandidates, func(i, j int) bool {
+		return euclideanDistance(p.Vector, sortedCandidates[i].Vector) <
+			euclideanDistance(p.Vector, sortedCandidates[j].Vector)
 	})
 
 	pruned := make([]int, 0, maxDegree)
-	pruned = append(pruned, candidates[0].ID)
 
-	maxAllowedDist := float64(math.MaxFloat32)
-	if alpha > 1 {
-		maxAllowedDist = euclideanDistance(p.Vector, candidates[0].Vector) * alpha
-	}
-
-	for _, candidate := range candidates[1:] {
-		keep := true
-		currentDist := euclideanDistance(p.Vector, candidate.Vector)
-
-		// α cond check
-		if alpha > 1 && currentDist > maxAllowedDist {
-			continue
+	for _, candidate := range sortedCandidates {
+		if len(pruned) >= maxDegree {
+			break
 		}
 
-		// existing check
+		keep := true
+		distToCandidate := euclideanDistance(p.Vector, candidate.Vector)
+
 		for _, existingID := range pruned {
-			existingDist := euclideanDistance(vectors[existingID], candidate.Vector)
-			if existingDist < currentDist {
-				keep = false
-				break
+			// Need the full node to get the vector
+			var existingNode *Node
+			for _, n := range sortedCandidates {
+				if n.ID == existingID {
+					existingNode = n
+					break
+				}
+			}
+			// This part is tricky without a map from ID to Node.
+			// Let's assume we can find it for now. A map would be more efficient.
+			if existingNode != nil {
+				distBetweenSelected := euclideanDistance(existingNode.Vector, candidate.Vector)
+				if alpha*distBetweenSelected < distToCandidate {
+					keep = false
+					break
+				}
 			}
 		}
 
 		if keep {
 			pruned = append(pruned, candidate.ID)
-			if len(pruned) >= maxDegree {
-				break
-			}
 		}
 	}
 
 	return pruned
 }
 
-func GreedySearch(graph *Graph, startID int, target []float64, L int) []int {
-	if len(graph.Nodes) == 1 {
-		return []int{0} // 单节点情况下直接返回自身
-	}
-
+func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []*Node) {
 	visited := make(map[int]struct{})
-	candidates := make(priorityQueue, 0)
-	heap.Init(&candidates)
+	candidates := &priorityQueue{}
+	heap.Init(candidates)
 
-	startNode := graph.Nodes[startID]
-	initialDist := euclideanDistance(startNode.Vector, target)
-	heap.Push(&candidates, &candidate{id: startID, dist: initialDist})
+	// Add start node to candidates
+	dist := euclideanDistance(graph.Nodes[startID].Vector, target)
+	heap.Push(candidates, &candidate{id: startID, dist: dist})
 
-	result := make([]int, 0, L)
+	resultPool := &priorityQueue{}
+	heap.Init(resultPool)
+	heap.Push(resultPool, &candidate{id: startID, dist: dist})
 
-	for candidates.Len() > 0 && len(result) < L {
-		current := heap.Pop(&candidates).(*candidate)
+	visitedNodesForPruning := []*Node{graph.Nodes[startID]}
+
+	for candidates.Len() > 0 {
+		current := heap.Pop(candidates).(*candidate)
+
 		if _, exists := visited[current.id]; exists {
 			continue
 		}
 		visited[current.id] = struct{}{}
-		result = append(result, current.id)
+
+		// Check termination condition
+		if resultPool.Len() > 0 {
+			farthestResult := (*resultPool)[0]
+			if current.dist > farthestResult.dist && resultPool.Len() >= L {
+				break
+			}
+		}
 
 		currentNode := graph.Nodes[current.id]
 		for _, neighborID := range currentNode.OutEdges {
 			if _, exists := visited[neighborID]; !exists {
 				neighborNode := graph.Nodes[neighborID]
-				dist := euclideanDistance(neighborNode.Vector, target)
-				heap.Push(&candidates, &candidate{id: neighborID, dist: dist})
+				neighborDist := euclideanDistance(neighborNode.Vector, target)
+
+				// Add to candidates and result pool
+				heap.Push(candidates, &candidate{id: neighborID, dist: neighborDist})
+				heap.Push(resultPool, &candidate{id: neighborID, dist: neighborDist})
+				if resultPool.Len() > L {
+					heap.Pop(resultPool) // Keep result pool size at L
+				}
+
+				// Collect all visited nodes for RobustPrune
+				visitedNodesForPruning = append(visitedNodesForPruning, neighborNode)
 			}
 		}
 	}
 
-	return result
+	finalIDs := make([]int, resultPool.Len())
+	for i := range finalIDs {
+		finalIDs[i] = (*resultPool)[i].id
+	}
+
+	return finalIDs, visitedNodesForPruning
 }
 
+/*
 func BuildVamanaGraph(vectors [][]float64, alpha float64, maxDegree int) *Graph {
 	n := len(vectors)
 	if n == 0 {
@@ -234,6 +262,7 @@ func BuildVamanaGraph(vectors [][]float64, alpha float64, maxDegree int) *Graph 
 
 	return graph
 }
+*/
 
 func ensureConnectivity(graph *Graph, vectors [][]float64) {
 	visited := make([]bool, len(graph.Nodes))
