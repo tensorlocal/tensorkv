@@ -39,7 +39,7 @@ type candidate struct {
 type priorityQueue []*candidate
 
 func (pq priorityQueue) Len() int           { return len(pq) }
-func (pq priorityQueue) Less(i, j int) bool { return pq[i].dist < pq[j].dist }
+func (pq priorityQueue) Less(i, j int) bool { return pq[i].dist > pq[j].dist }
 func (pq priorityQueue) Swap(i, j int)      { pq[i], pq[j] = pq[j], pq[i] }
 
 func (pq *priorityQueue) Push(x interface{}) {
@@ -141,7 +141,7 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 		visited[current.id] = struct{}{}
 
 		// Check termination condition
-		if resultPool.Len() > 0 {
+		if resultPool.Len() >= L {
 			farthestResult := (*resultPool)[0]
 			if current.dist > farthestResult.dist && resultPool.Len() >= L {
 				break
@@ -154,14 +154,14 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 				neighborNode := graph.Nodes[neighborID]
 				neighborDist := euclideanDistance(neighborNode.Vector, target)
 
-				// Add to candidates and result pool
-				heap.Push(candidates, &candidate{id: neighborID, dist: neighborDist})
-				heap.Push(resultPool, &candidate{id: neighborID, dist: neighborDist})
-				if resultPool.Len() > L {
-					heap.Pop(resultPool) // Keep result pool size at L
+				if resultPool.Len() < L {
+					heap.Push(resultPool, &candidate{id: neighborID, dist: neighborDist})
+				} else if neighborDist < (*resultPool)[0].dist { // Si el nuevo es mejor que el peor del pool
+					heap.Pop(resultPool)                                                  // Eliminar el peor
+					heap.Push(resultPool, &candidate{id: neighborID, dist: neighborDist}) // Insertar el nuevo
 				}
 
-				// Collect all visited nodes for RobustPrune
+				heap.Push(candidates, &candidate{id: neighborID, dist: neighborDist})
 				visitedNodesForPruning = append(visitedNodesForPruning, neighborNode)
 			}
 		}
@@ -385,7 +385,8 @@ func BuildVamanaGraphForShard(shardVectors map[int][]float64, alpha float64, max
 		graph.MedoidID = computeMedoid(vectors) // Medoid is local
 		// Initialize with random edges
 		for _, node := range graph.Nodes {
-			for j := 0; j < 5 && j < n; j++ { // Simple random init
+			numEdges := max(2, n/2)
+			for j := 0; j < numEdges && j < n; j++ { // Simple random init
 				randNeighbor := rand.Intn(n)
 				if randNeighbor != node.ID {
 					node.OutEdges = append(node.OutEdges, randNeighbor)
@@ -436,7 +437,7 @@ func BuildVamanaGraphForShard(shardVectors map[int][]float64, alpha float64, max
 			}
 		}
 	}
-
+	ensureConnectivity(graph, vectors)
 	finalGraph := &Graph{Nodes: make([]*Node, n), MaxDegree: maxDegree}
 	for i, node := range graph.Nodes {
 		origID := localIDToOrigID[i]

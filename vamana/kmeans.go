@@ -2,7 +2,9 @@ package vamana
 
 import (
 	"math"
+	"math/rand"
 	"sort"
+	"time"
 )
 
 //todo: need more for production
@@ -18,15 +20,15 @@ func KMeans(vectors [][]float64, k, maxIterations int) [][]float64 {
 
 	dim := len(vectors[0])
 	centroids := make([][]float64, k)
-
-	// 初始化质心：选择前k个不同的向量作为初始质心
+	// 随机选择初始质心
+	rand.Seed(time.Now().UnixNano())
+	indices := rand.Perm(len(vectors))
 	for i := 0; i < k; i++ {
 		centroids[i] = make([]float64, dim)
-		copy(centroids[i], vectors[i%len(vectors)])
+		copy(centroids[i], vectors[indices[i]])
 	}
 
 	for iter := 0; iter < maxIterations; iter++ {
-		// 分配向量到最近的质心
 		clusters := make([][]int, k)
 		for i, vec := range vectors {
 			minDist := math.MaxFloat64
@@ -41,10 +43,14 @@ func KMeans(vectors [][]float64, k, maxIterations int) [][]float64 {
 			clusters[closestCentroid] = append(clusters[closestCentroid], i)
 		}
 
-		// 更新质心
 		converged := true
 		for i := 0; i < k; i++ {
 			if len(clusters[i]) == 0 {
+				// 重新随机选择质心
+				randIndex := rand.Intn(len(vectors))
+				centroids[i] = make([]float64, dim)
+				copy(centroids[i], vectors[randIndex])
+				converged = false
 				continue
 			}
 
@@ -58,7 +64,6 @@ func KMeans(vectors [][]float64, k, maxIterations int) [][]float64 {
 				newCentroid[d] /= float64(len(clusters[i]))
 			}
 
-			// 检查是否收敛
 			if euclideanDistanceSquared(centroids[i], newCentroid) > 1e-10 {
 				converged = false
 			}

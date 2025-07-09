@@ -1,7 +1,6 @@
-package vamana
+vamana/diskann.gopackage vamana
 
 import (
-	"container/heap"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -103,13 +102,19 @@ func (da *DiskANN) Search(query []float64, k int, L int, beamWidth int) ([]int, 
 		}
 	}
 
-	// 优先队列存储候选者，距离使用近似距离计算
-	candidates := &priorityQueue{}
-	heap.Init(candidates)
+	// 候选队列 - 使用近似距离，按距离从小到大排序（最小堆）
+	type candidateItem struct {
+		id   int
+		dist float64
+	}
+	candidates := make([]candidateItem, 0)
 
-	// 结果集，使用精确距离排序
-	results := &priorityQueue{}
-	heap.Init(results)
+	// 结果集 - 存储精确距离的结果
+	type resultItem struct {
+		id   int
+		dist float64
+	}
+	results := make([]resultItem, 0)
 
 	visited := make(map[int]struct{})
 
@@ -117,58 +122,87 @@ func (da *DiskANN) Search(query []float64, k int, L int, beamWidth int) ([]int, 
 	startID := da.MedoidID
 	visited[startID] = struct{}{}
 	approxDist := da.quantizer.ApproximateDistance(query, da.compressedVectors[startID])
-	heap.Push(candidates, &candidate{id: startID, dist: approxDist})
+	candidates = append(candidates, candidateItem{id: startID, dist: approxDist})
 
-	for candidates.Len() > 0 {
-		// 检查终止条件：如果候选队列中最近的点比结果队列中最远的点还要远，可以提前终止
-		if results.Len() >= L {
-			farthestResultDist := (*results)[0].dist // Max-heap behavior simulated on min-heap
-			closestCandidateDist, err := da.getPreciseDist(query, (*candidates)[0].id)
-			if err != nil {
-				return nil, err
-			}
-			if closestCandidateDist > farthestResultDist {
-				break
-			}
+	for len(candidates) > 0 {
+		// 按距离排序候选队列，取距离最小的
+		sort.Slice(candidates, func(i, j int) bool {
+			return candidates[i].dist < candidates[j].dist
+		})
+
+		// 提取 beamWidth 个最近的候选者
+		var beam []candidateItem
+		extractCount := beamWidth
+		if extractCount > len(candidates) {
+			extractCount = len(candidates)
 		}
 
-		var beam []*candidate
-		for i := 0; i < beamWidth && candidates.Len() > 0; i++ {
-			beam = append(beam, heap.Pop(candidates).(*candidate))
-		}
+		beam = candidates[:extractCount]
+		candidates = candidates[extractCount:]
 
 		// 从磁盘批量读取这些节点的数据
-		fullNodes, err := da.readNodesFromDisk(beam)
+		beamCandidates := make([]*candidate, len(beam))
+		for i, item := range beam {
+			beamCandidates[i] = &candidate{id: item.id, dist: item.dist}
+		}
+
+		fullNodes, err := da.readNodesFromDisk(beamCandidates)
 		if err != nil {
 			return nil, err
 		}
 
 		for _, node := range fullNodes {
+			// 计算精确距离
 			preciseDist := euclideanDistance(query, node.Vector)
-			heap.Push(results, &candidate{id: node.ID, dist: preciseDist})
-			// 保持结果集大小不超过L
-			if results.Len() > L {
-				heap.Pop(results)
-			}
 
+			// 添加到结果集
+			results = append(results, resultItem{id: node.ID, dist: preciseDist})
+
+			// 探索邻居
 			for _, neighborID := range node.OutEdges {
 				if _, exists := visited[neighborID]; !exists {
 					visited[neighborID] = struct{}{}
 					approxDist := da.quantizer.ApproximateDistance(query, da.compressedVectors[neighborID])
-					heap.Push(candidates, &candidate{id: neighborID, dist: approxDist})
+					candidates = append(candidates, candidateItem{id: neighborID, dist: approxDist})
 				}
+			}
+		}
+
+		// 保持结果集大小不超过L，按精确距离排序并保留最近的L个
+		if len(results) > L {
+			sort.Slice(results, func(i, j int) bool {
+				return results[i].dist < results[j].dist
+			})
+			results = results[:L]
+		}
+
+		// 早期终止条件：如果候选队列为空或者候选队列中最近的点比结果集中最远的点还要远
+		if len(candidates) > 0 && len(results) >= L {
+			sort.Slice(results, func(i, j int) bool {
+				return results[i].dist < results[j].dist
+			})
+			farthestResultDist := results[len(results)-1].dist
+
+			sort.Slice(candidates, func(i, j int) bool {
+				return candidates[i].dist < candidates[j].dist
+			})
+			closestCandidateDist := candidates[0].dist
+
+			// 由于使用的是近似距离，这里需要一个容忍度
+			if closestCandidateDist > farthestResultDist*1.5 {
+				break
 			}
 		}
 	}
 
-	// 返回最终排好序的 top-k 结果
-	finalResults := make([]int, 0, k)
-	fmt.Println("res: ", (*results), (*results)[0].dist)
-	sort.Slice(*results, func(i, j int) bool {
-		return (*results)[i].dist < (*results)[j].dist // 直接访问切片元素
+	// 最终排序并返回 top-k 结果
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].dist < results[j].dist
 	})
-	for i := 0; i < k && i < results.Len(); i++ {
-		finalResults = append(finalResults, (*results)[i].id)
+
+	finalResults := make([]int, 0, k)
+	for i := 0; i < k && i < len(results); i++ {
+		finalResults = append(finalResults, results[i].id)
 	}
 
 	return finalResults, nil
@@ -195,7 +229,11 @@ func (da *DiskANN) writeGraphToDisk(vectors [][]float64, allEdges map[int]map[in
 			return err
 		}
 
+		// 初始化邻居数组为 -1 (而不是 0)
 		neighbors := make([]int32, da.MaxDegree)
+		for j := range neighbors {
+			neighbors[j] = -1 // 使用 -1 作为无效邻居标记
+		}
 
 		nodeEdges, ok := allEdges[i]
 		if ok {
@@ -243,8 +281,8 @@ func (da *DiskANN) readNodesFromDisk(nodesToRead []*candidate) ([]*Node, error) 
 		edges := make([]int, 0, da.MaxDegree)
 		edgeOffset := da.VectorDim * 8
 		for i := 0; i < da.MaxDegree; i++ {
-			id := int(binary.LittleEndian.Uint32(buf[edgeOffset+i*4 : edgeOffset+(i+1)*4]))
-			if id != 0 { // 假设 0 是 padding 值
+			id := int(int32(binary.LittleEndian.Uint32(buf[edgeOffset+i*4 : edgeOffset+(i+1)*4])))
+			if id != -1 { // 使用 -1 作为无效邻居标记
 				edges = append(edges, id)
 			}
 		}
