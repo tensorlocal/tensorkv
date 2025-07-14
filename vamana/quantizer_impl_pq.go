@@ -96,7 +96,7 @@ func (pq *ProductQuantizer) Compress(vector []float64) []byte {
 		bestCentroidID := -1
 		minDistSq := math.MaxFloat64
 		for j, centroid := range pq.codebooks[i] {
-			distSq := euclideanDistanceSquared(subVector, centroid) // 修复：使用平方距离进行比较
+			distSq := euclideanDistanceUnsafe(subVector, centroid) // 修复：使用平方距离进行比较
 			if distSq < minDistSq {
 				minDistSq = distSq
 				bestCentroidID = j
@@ -128,7 +128,7 @@ func (pq *ProductQuantizer) ApproximateDistance(query []float64, compressed []by
 		}
 
 		for j := 0; j < pq.ks && j < len(pq.codebooks[i]); j++ { // 修复：添加边界检查
-			distTable[i][j] = euclideanDistanceSquared(querySubVector, pq.codebooks[i][j])
+			distTable[i][j] = euclideanDistanceUnsafe(querySubVector, pq.codebooks[i][j])
 		}
 	}
 
@@ -146,17 +146,4 @@ func (pq *ProductQuantizer) ApproximateDistance(query []float64, compressed []by
 // CompressedVectorSize 返回压缩后的大小
 func (pq *ProductQuantizer) CompressedVectorSize() int {
 	return pq.m
-}
-
-// euclideanDistanceSquared 计算欧氏距离的平方（避免开方运算以提高性能）
-func euclideanDistanceSquared(a, b []float64) float64 {
-	if len(a) != len(b) {
-		log.Fatalf("Vector dimensions do not match: %d vs %d", len(a), len(b))
-	}
-	var sum float64
-	for i := range a {
-		diff := a[i] - b[i]
-		sum += diff * diff
-	}
-	return sum
 }

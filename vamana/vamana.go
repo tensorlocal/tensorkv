@@ -55,16 +55,6 @@ func (pq *priorityQueue) Pop() interface{} {
 	return item
 }
 
-// 欧氏距离平方优化计算
-func euclideanDistance(a, b []float64) float64 {
-	var sum float64
-	for i := range a {
-		diff := a[i] - b[i]
-		sum += diff * diff
-	}
-	return sum
-}
-
 func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []int {
 	if len(candidates) == 0 {
 		return nil
@@ -75,8 +65,8 @@ func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []in
 	copy(sortedCandidates, candidates)
 
 	sort.Slice(sortedCandidates, func(i, j int) bool {
-		return euclideanDistance(p.Vector, sortedCandidates[i].Vector) <
-			euclideanDistance(p.Vector, sortedCandidates[j].Vector)
+		return euclideanDistanceUnsafe(p.Vector, sortedCandidates[i].Vector) <
+			euclideanDistanceUnsafe(p.Vector, sortedCandidates[j].Vector)
 	})
 
 	pruned := make([]int, 0, maxDegree)
@@ -87,7 +77,7 @@ func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []in
 		}
 
 		keep := true
-		distToCandidate := euclideanDistance(p.Vector, candidate.Vector)
+		distToCandidate := euclideanDistanceUnsafe(p.Vector, candidate.Vector)
 
 		for _, existingID := range pruned {
 			// Need the full node to get the vector
@@ -101,7 +91,7 @@ func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []in
 			// This part is tricky without a map from ID to Node.
 			// Let's assume we can find it for now. A map would be more efficient.
 			if existingNode != nil {
-				distBetweenSelected := euclideanDistance(existingNode.Vector, candidate.Vector)
+				distBetweenSelected := euclideanDistanceUnsafe(existingNode.Vector, candidate.Vector)
 				if alpha*distBetweenSelected < distToCandidate {
 					keep = false
 					break
@@ -123,7 +113,7 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 	heap.Init(candidates)
 
 	// Add start node to candidates
-	dist := euclideanDistance(graph.Nodes[startID].Vector, target)
+	dist := euclideanDistanceUnsafe(graph.Nodes[startID].Vector, target)
 	heap.Push(candidates, &candidate{id: startID, dist: dist})
 
 	resultPool := &priorityQueue{}
@@ -152,7 +142,7 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 		for _, neighborID := range currentNode.OutEdges {
 			if _, exists := visited[neighborID]; !exists {
 				neighborNode := graph.Nodes[neighborID]
-				neighborDist := euclideanDistance(neighborNode.Vector, target)
+				neighborDist := euclideanDistanceUnsafe(neighborNode.Vector, target)
 
 				if resultPool.Len() < L {
 					heap.Push(resultPool, &candidate{id: neighborID, dist: neighborDist})
@@ -288,7 +278,7 @@ func ensureConnectivity(graph *Graph, vectors [][]float64) {
 
 			for j, isJ := range visited {
 				if isJ {
-					dist := euclideanDistance(vectors[i], vectors[j])
+					dist := euclideanDistanceUnsafe(vectors[i], vectors[j])
 					if dist < minDist {
 						minDist = dist
 						closestVisited = j
@@ -323,7 +313,7 @@ func computeMedoid(vectors [][]float64) int {
 			wg.Add(1)
 			go func(i, j int) {
 				defer wg.Done()
-				dist := euclideanDistance(vectors[i], vectors[j])
+				dist := euclideanDistanceUnsafe(vectors[i], vectors[j])
 				distChan <- dist
 			}(i, j)
 		}
@@ -341,7 +331,7 @@ func computeMedoid(vectors [][]float64) int {
 		total := float64(0)
 		for j := range vectors {
 			if i != j {
-				total += euclideanDistance(vectors[i], vectors[j])
+				total += euclideanDistanceUnsafe(vectors[i], vectors[j])
 			}
 		}
 		if total < minTotal {
