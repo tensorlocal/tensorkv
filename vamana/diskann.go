@@ -1,4 +1,4 @@
-vamana/diskann.gopackage vamana
+package vamana
 
 import (
 	"encoding/binary"
@@ -153,7 +153,7 @@ func (da *DiskANN) Search(query []float64, k int, L int, beamWidth int) ([]int, 
 
 		for _, node := range fullNodes {
 			// 计算精确距离
-			preciseDist := euclideanDistance(query, node.Vector)
+			preciseDist := euclideanDistanceUnsafe(query, node.Vector)
 
 			// 添加到结果集
 			results = append(results, resultItem{id: node.ID, dist: preciseDist})
@@ -301,5 +301,5 @@ func (da *DiskANN) getPreciseDist(query []float64, nodeID int) (float64, error) 
 	if err != nil {
 		return 0, err
 	}
-	return euclideanDistance(query, nodes[0].Vector), nil
+	return euclideanDistanceUnsafe(query, nodes[0].Vector), nil
 }
