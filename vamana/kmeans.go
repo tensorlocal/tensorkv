@@ -17,7 +17,6 @@ func KMeans(vectors [][]float64, k, maxIterations int) [][]float64 {
 	if k > len(vectors) {
 		k = len(vectors)
 	}
-
 	dim := len(vectors[0])
 	centroids := make([][]float64, k)
 	// 随机选择初始质心
@@ -34,7 +33,7 @@ func KMeans(vectors [][]float64, k, maxIterations int) [][]float64 {
 			minDist := math.MaxFloat64
 			closestCentroid := 0
 			for j, centroid := range centroids {
-				dist := euclideanDistanceSquared(vec, centroid)
+				dist := euclideanDistanceUnsafe(vec, centroid)
 				if dist < minDist {
 					minDist = dist
 					closestCentroid = j
@@ -64,7 +63,7 @@ func KMeans(vectors [][]float64, k, maxIterations int) [][]float64 {
 				newCentroid[d] /= float64(len(clusters[i]))
 			}
 
-			if euclideanDistanceSquared(centroids[i], newCentroid) > 1e-10 {
+			if euclideanDistanceUnsafe(centroids[i], newCentroid) > 1e-10 {
 				converged = false
 			}
 			centroids[i] = newCentroid
@@ -89,7 +88,7 @@ func assignToLNearest(vectors [][]float64, centroids [][]float64, l int) [][]int
 		}
 		dists := make([]centroidDist, len(centroids))
 		for j, center := range centroids {
-			dists[j] = centroidDist{index: j, dist: euclideanDistance(vec, center)}
+			dists[j] = centroidDist{index: j, dist: euclideanDistanceUnsafe(vec, center)}
 		}
 		sort.Slice(dists, func(a, b int) bool { return dists[a].dist < dists[b].dist })
 
