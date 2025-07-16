@@ -46,39 +46,29 @@ func (da *DiskANN) Build(vectors [][]float64, alpha float64, l int, k int) error
 
 	log.Println("Starting DiskANN build process...")
 
-	log.Printf("Running K-Means with k=%d...", k)
-	centroids := KMeans(vectors, k, 25)
-	overlappingAssignments := assignToLNearest(vectors, centroids, l) // 创建重叠分片 [cite: 153]
-
-	log.Println("Building Vamana graph for each shard...")
 	allEdges := make(map[int]map[int]struct{}) // 使用 map 来存储全局的边关系
-	for i := range centroids {
-		shardVectors := make(map[int][]float64)
-		for _, pointIndex := range overlappingAssignments[i] {
-			shardVectors[pointIndex] = vectors[pointIndex]
-		}
 
-		shardGraph := BuildVamanaGraphForShard(shardVectors, alpha, da.MaxDegree)
+	VamanaGraph := BuildVamanaGraphForShard(vectors, alpha, da.MaxDegree)
 
-		for _, node := range shardGraph.Nodes {
-			if _, ok := allEdges[node.ID]; !ok {
-				allEdges[node.ID] = make(map[int]struct{})
-			}
-			for _, neighborID := range node.OutEdges {
-				allEdges[node.ID][neighborID] = struct{}{}
-			}
+	log.Printf("Finished build Graph %d", n)
+
+	for _, node := range VamanaGraph.Nodes {
+		if _, ok := allEdges[node.ID]; !ok {
+			allEdges[node.ID] = make(map[int]struct{})
 		}
-		log.Printf("Finished shard %d/%d", i+1, k)
+		for _, neighborID := range node.OutEdges {
+			allEdges[node.ID][neighborID] = struct{}{}
+		}
 	}
 
 	log.Println("Writing final graph structure to disk...")
+
 	da.MedoidID = computeMedoid(vectors)
 	err := da.writeGraphToDisk(vectors, allEdges)
 	if err != nil {
 		return err
 	}
 
-	// 4. 训练量化器并生成所有向量的压缩版本
 	log.Println("Training quantizer and compressing vectors...")
 	da.quantizer.Train(vectors)
 	da.compressedVectors = make([][]byte, n)
@@ -87,6 +77,7 @@ func (da *DiskANN) Build(vectors [][]float64, alpha float64, l int, k int) error
 	}
 
 	log.Println("DiskANN build completed successfully.")
+	
 	return nil
 }
 

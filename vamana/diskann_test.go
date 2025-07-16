@@ -254,16 +254,16 @@ func TestDiskANNCorrectness(t *testing.T) {
 		{Dimension: 128, DataSize: 500, K: 10, L: 50, Alpha: 1.2, MaxDegree: 32, PQM: 16, PQKs: 256},
 
 		// 中等规模测试
-		{Dimension: 256, DataSize: 1000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 64, PQM: 32, PQKs: 256},
-		{Dimension: 512, DataSize: 2000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 64, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 1000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 2000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
 
 		// 大规模测试
-		{Dimension: 768, DataSize: 5000, K: 50, L: 200, Alpha: 1.2, MaxDegree: 128, PQM: 96, PQKs: 256},
-		{Dimension: 1024, DataSize: 10000, K: 50, L: 200, Alpha: 1.2, MaxDegree: 128, PQM: 128, PQKs: 256},
+		{Dimension: 1024, DataSize: 5000, K: 50, L: 200, Alpha: 1.2, MaxDegree: 128, PQM: 64, PQKs: 256},
+		{Dimension: 1024, DataSize: 10000, K: 50, L: 200, Alpha: 1.2, MaxDegree: 128, PQM: 4, PQKs: 256},
 
 		// 极端情况测试
 		{Dimension: 2, DataSize: 50, K: 5, L: 20, Alpha: 1.2, MaxDegree: 16, PQM: 2, PQKs: 256},
-		{Dimension: 2048, DataSize: 1000, K: 10, L: 100, Alpha: 1.2, MaxDegree: 64, PQM: 256, PQKs: 256},
+		{Dimension: 20480, DataSize: 10, K: 10, L: 100, Alpha: 1.2, MaxDegree: 64, PQM: 20480, PQKs: 256},
 	}
 
 	fmt.Println("开始 DiskANN 正确性测试...")

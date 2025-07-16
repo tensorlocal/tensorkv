@@ -306,7 +306,7 @@ func randomEdges(totalNodes, numEdges int) []int {
 func computeMedoid(vectors [][]float64) int {
 	type pair struct{ i, j int }
 	distChan := make(chan float64, len(vectors)*(len(vectors)-1)/2)
-
+	//O(N^2)
 	var wg sync.WaitGroup
 	for i := 0; i < len(vectors); i++ {
 		for j := i + 1; j < len(vectors); j++ {
@@ -342,23 +342,10 @@ func computeMedoid(vectors [][]float64) int {
 	return medoid
 }
 
-func BuildVamanaGraphForShard(shardVectors map[int][]float64, alpha float64, maxDegree int) *Graph {
-	n := len(shardVectors)
+func BuildVamanaGraphForShard(vectors [][]float64, alpha float64, maxDegree int) *Graph {
+	n := len(vectors)
 	if n == 0 {
 		return nil
-	}
-
-	// Remap original IDs to local 0-based indices for in-memory processing
-	localIDToOrigID := make([]int, 0, n)
-	origIDToLocalID := make(map[int]int)
-	vectors := make([][]float64, 0, n)
-
-	i := 0
-	for origID, vec := range shardVectors {
-		localIDToOrigID = append(localIDToOrigID, origID)
-		origIDToLocalID[origID] = i
-		vectors = append(vectors, vec)
-		i++
 	}
 
 	graph := &Graph{
@@ -428,15 +415,6 @@ func BuildVamanaGraphForShard(shardVectors map[int][]float64, alpha float64, max
 		}
 	}
 	ensureConnectivity(graph, vectors)
-	finalGraph := &Graph{Nodes: make([]*Node, n), MaxDegree: maxDegree}
-	for i, node := range graph.Nodes {
-		origID := localIDToOrigID[i]
-		origEdges := make([]int, len(node.OutEdges))
-		for j, localEdge := range node.OutEdges {
-			origEdges[j] = localIDToOrigID[localEdge]
-		}
-		finalGraph.Nodes[i] = &Node{ID: origID, Vector: node.Vector, OutEdges: origEdges}
-	}
 
-	return finalGraph
+	return graph
 }
