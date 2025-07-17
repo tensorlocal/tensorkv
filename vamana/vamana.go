@@ -16,6 +16,8 @@ const (
 	DefaultBeamWidth  = 4
 )
 
+var totalPruneC = 0
+
 type Graph struct {
 	Nodes     []*Node
 	MedoidID  int
@@ -28,6 +30,7 @@ type Node struct {
 	ID       int
 	Vector   []float64
 	OutEdges []int
+	dCache   map[int]float64
 }
 
 type candidate struct {
@@ -55,18 +58,39 @@ func (pq *priorityQueue) Pop() interface{} {
 	return item
 }
 
+// src -> dst distance
+func distanceCacheWithNode(src *Node, dst *Node) float64 {
+	if dist, ok := dst.dCache[src.ID]; ok {
+		return dist
+	} else {
+		mdist := euclideanDistanceUnsafe(src.Vector, dst.Vector)
+		dst.dCache[src.ID] = mdist
+		return mdist
+	}
+}
+
 func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []int {
+	totalPruneC++
 	if len(candidates) == 0 {
 		return nil
 	}
+	//distanceCache := make(map[int]float64, len(candidates))
+	sortedCandidates := make([]*Node, len(candidates))
+	nodeCache := make(map[int]*Node, len(candidates))
+	for _, candidate := range candidates {
+
+		distanceCacheWithNode(p, candidate)
+		nodeCache[candidate.ID] = candidate
+
+	}
 
 	// Create a copy to avoid modifying the original slice of candidates
-	sortedCandidates := make([]*Node, len(candidates))
+
 	copy(sortedCandidates, candidates)
 
 	sort.Slice(sortedCandidates, func(i, j int) bool {
-		return euclideanDistanceUnsafe(p.Vector, sortedCandidates[i].Vector) <
-			euclideanDistanceUnsafe(p.Vector, sortedCandidates[j].Vector)
+		return sortedCandidates[i].dCache[p.ID] <
+			sortedCandidates[j].dCache[p.ID]
 	})
 
 	pruned := make([]int, 0, maxDegree)
@@ -77,21 +101,22 @@ func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []in
 		}
 
 		keep := true
-		distToCandidate := euclideanDistanceUnsafe(p.Vector, candidate.Vector)
+		distToCandidate := candidate.dCache[p.ID]
 
 		for _, existingID := range pruned {
 			// Need the full node to get the vector
-			var existingNode *Node
-			for _, n := range sortedCandidates {
-				if n.ID == existingID {
-					existingNode = n
-					break
-				}
+			existingNode, ok := nodeCache[existingID]
+			if !ok {
+				continue
 			}
+
 			// This part is tricky without a map from ID to Node.
 			// Let's assume we can find it for now. A map would be more efficient.
 			if existingNode != nil {
-				distBetweenSelected := euclideanDistanceUnsafe(existingNode.Vector, candidate.Vector)
+				//distBetweenSelected := euclideanDistanceUnsafe(existingNode.Vector, candidate.Vector)
+
+				distBetweenSelected := distanceCacheWithNode(existingNode, candidate)
+
 				if alpha*distBetweenSelected < distToCandidate {
 					keep = false
 					break
@@ -355,7 +380,7 @@ func BuildVamanaGraphForShard(vectors [][]float64, alpha float64, maxDegree int)
 	}
 
 	for i := range vectors {
-		graph.Nodes[i] = &Node{ID: i, Vector: vectors[i], OutEdges: make([]int, 0)}
+		graph.Nodes[i] = &Node{ID: i, Vector: vectors[i], OutEdges: make([]int, 0), dCache: map[int]float64{}}
 	}
 
 	if n > 1 {

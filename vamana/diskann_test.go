@@ -256,6 +256,9 @@ func TestDiskANNCorrectness(t *testing.T) {
 		// 中等规模测试
 		{Dimension: 128, DataSize: 1000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
 		{Dimension: 128, DataSize: 2000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 3000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 4000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 5000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
 
 		// 大规模测试
 		{Dimension: 1024, DataSize: 5000, K: 50, L: 200, Alpha: 1.2, MaxDegree: 128, PQM: 64, PQKs: 256},
@@ -312,8 +315,8 @@ func TestDiskANNCorrectness(t *testing.T) {
 		})
 	}
 
-	fmt.Printf("\n总体测试结果: %d/%d 通过 (%.1f%%)\n",
-		passedTests, totalTests, float64(passedTests)/float64(totalTests)*100)
+	fmt.Printf("\n总体测试结果: %d/%d 通过 (%.1f%%)\n 调用prune : %d",
+		passedTests, totalTests, float64(passedTests)/float64(totalTests)*100, totalPruneC)
 }
 
 func testDiskANN(t *testing.T, config TestConfig) TestResult {
