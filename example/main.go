@@ -39,7 +39,7 @@ func main() {
 
 	// --- 3. 初始化 DiskANN 和量化器 ---
 	log.Println("Step 2: Initializing DiskANN...")
-	
+
 	// 使用一个简化的量化器作为示例
 	quantizer := vamana.NewProductQuantizer(16, 256, true)
 
@@ -98,10 +98,10 @@ func main() {
 }
 
 // generateRandomData 是一个辅助函数，用于创建指定数量和维度的随机向量
-func generateRandomData(num, dim int) [][]float64 {
-	data := make([][]float64, num)
+func generateRandomData(num, dim int) [][]float32 {
+	data := make([][]float32, num)
 	for i := 0; i < num; i++ {
-		vector := make([]float64, dim)
+		vector := make([]float32, dim)
 		for j := 0; j < dim; j++ {
 			vector[j] = rand.Float64()
 		}

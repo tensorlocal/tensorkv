@@ -2,9 +2,11 @@ package vamana
 
 import (
 	"container/heap"
+	"fmt"
 	"math"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -55,6 +57,25 @@ func (pq *priorityQueue) Pop() interface{} {
 	n := len(old)
 	item := old[n-1]
 	*pq = old[0 : n-1]
+	return item
+}
+
+type minHeap []*candidate
+
+func (mh minHeap) Len() int           { return len(mh) }
+func (mh minHeap) Less(i, j int) bool { return mh[i].dist < mh[j].dist }
+func (mh minHeap) Swap(i, j int)      { mh[i], mh[j] = mh[j], mh[i] }
+
+func (mh *minHeap) Push(x interface{}) {
+	item := x.(*candidate)
+	*mh = append(*mh, item)
+}
+
+func (mh *minHeap) Pop() interface{} {
+	old := *mh
+	n := len(old)
+	item := old[n-1]
+	*mh = old[0 : n-1]
 	return item
 }
 
@@ -125,7 +146,9 @@ func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []in
 		}
 
 		if keep {
-			pruned = append(pruned, candidate.ID)
+			if candidate.ID != p.ID {
+				pruned = append(pruned, candidate.ID)
+			}
 		}
 	}
 
@@ -134,7 +157,9 @@ func RobustPrune(p *Node, candidates []*Node, alpha float64, maxDegree int) []in
 
 func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []*Node) {
 	visited := make(map[int]struct{})
-	candidates := &priorityQueue{}
+	visitedMap := make(map[int]*Node, L*2)
+
+	candidates := &minHeap{}
 	heap.Init(candidates)
 
 	// Add start node to candidates
@@ -145,7 +170,7 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 	heap.Init(resultPool)
 	heap.Push(resultPool, &candidate{id: startID, dist: dist})
 
-	visitedNodesForPruning := []*Node{graph.Nodes[startID]}
+	//visitedNodesForPruning := []*Node{graph.Nodes[startID]}
 
 	for candidates.Len() > 0 {
 		current := heap.Pop(candidates).(*candidate)
@@ -153,20 +178,19 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 		if _, exists := visited[current.id]; exists {
 			continue
 		}
+
 		visited[current.id] = struct{}{}
 
-		// Check termination condition
-		if resultPool.Len() >= L {
-			farthestResult := (*resultPool)[0]
-			if current.dist > farthestResult.dist && resultPool.Len() >= L {
-				break
-			}
+		if resultPool.Len() >= L && current.dist > (*resultPool)[0].dist {
+			break
 		}
 
 		currentNode := graph.Nodes[current.id]
 		for _, neighborID := range currentNode.OutEdges {
 			if _, exists := visited[neighborID]; !exists {
+
 				neighborNode := graph.Nodes[neighborID]
+
 				neighborDist := euclideanDistanceUnsafe(neighborNode.Vector, target)
 
 				if resultPool.Len() < L {
@@ -177,7 +201,11 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 				}
 
 				heap.Push(candidates, &candidate{id: neighborID, dist: neighborDist})
-				visitedNodesForPruning = append(visitedNodesForPruning, neighborNode)
+
+				//visitedNodesForPruning = append(visitedNodesForPruning, neighborNode)
+				if _, ok := visitedMap[neighborID]; !ok {
+					visitedMap[neighborID] = neighborNode
+				}
 			}
 		}
 	}
@@ -185,6 +213,12 @@ func GreedySearch(graph *Graph, startID int, target []float64, L int) ([]int, []
 	finalIDs := make([]int, resultPool.Len())
 	for i := range finalIDs {
 		finalIDs[i] = (*resultPool)[i].id
+	}
+
+	visitedNodesForPruning := make([]*Node, 0, len(visitedMap))
+
+	for _, n := range visitedMap {
+		visitedNodesForPruning = append(visitedNodesForPruning, n)
 	}
 
 	return finalIDs, visitedNodesForPruning
@@ -380,7 +414,7 @@ func BuildVamanaGraphForShard(vectors [][]float64, alpha float64, maxDegree int)
 	}
 
 	for i := range vectors {
-		graph.Nodes[i] = &Node{ID: i, Vector: vectors[i], OutEdges: make([]int, 0), dCache: map[int]float64{}}
+		graph.Nodes[i] = &Node{ID: i, Vector: vectors[i], OutEdges: make([]int, 0, maxDegree*2), dCache: map[int]float64{}}
 	}
 
 	if n > 1 {
@@ -442,4 +476,76 @@ func BuildVamanaGraphForShard(vectors [][]float64, alpha float64, maxDegree int)
 	ensureConnectivity(graph, vectors)
 
 	return graph
+}
+func (g *Graph) GenerateDotGraphOptimized() string {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+
+	var sb strings.Builder
+	// Use 'neato' layout engine for absolute positioning based on 'pos' attribute
+	// or 'fdp' for force-directed layouts that might consider distances more organically
+	// 'neato' is good when you want to explicitly control positions.
+	sb.WriteString("digraph G {\n")
+	sb.WriteString("  overlap=false;\n")                                                                     // Prevent node overlap
+	sb.WriteString("  splines=true;\n")                                                                      // Draw smooth lines
+	sb.WriteString("  node [shape=circle, style=filled, fillcolor=lightblue, fixedsize=true, width=0.8];\n") // Styling for nodes
+
+	// Iterate over nodes to define them and their attributes, including position
+	for _, node := range g.Nodes {
+		if node == nil {
+			continue
+		}
+
+		// Prepare label for the node
+		label := fmt.Sprintf("ID: %d\\nVec: %v", node.ID, node.Vector)
+
+		// Try to use the first two dimensions of the vector as X, Y coordinates
+		posAttribute := ""
+		if len(node.Vector) >= 2 {
+			// Convert to string in Graphviz 'x,y!' format for absolute positioning
+			// Multiplied by a factor (e.g., 50) for better spacing in the graph
+			x := node.Vector[0] * 50
+			y := node.Vector[1] * 50
+			posAttribute = fmt.Sprintf(" pos=\"%f,%f!\"", x, y) // '!' makes position fixed
+		}
+
+		// Define node with its ID, label, and position
+		sb.WriteString(fmt.Sprintf("  %d [label=\"%s\"%s];\n", node.ID, label, posAttribute))
+	}
+
+	// Iterate over nodes to define edges (connections)
+	for _, node := range g.Nodes {
+		if node == nil {
+			continue
+		}
+		for _, edgeID := range node.OutEdges {
+			// Add a directed edge from the current node to the edgeID node
+			sb.WriteString(fmt.Sprintf("  %d -> %d;\n", node.ID, edgeID))
+		}
+	}
+
+	// Highlight the medoid node
+	// Find the medoid node to ensure its vector is included in its label if its ID isn't directly the index
+	var medoidNode *Node
+	for _, node := range g.Nodes {
+		if node != nil && node.ID == g.MedoidID {
+			medoidNode = node
+			break
+		}
+	}
+
+	if medoidNode != nil {
+		medoidLabel := fmt.Sprintf("Medoid\\nID: %d\\nVec: %v", medoidNode.ID, medoidNode.Vector)
+		posAttribute := ""
+		if len(medoidNode.Vector) >= 2 {
+			x := medoidNode.Vector[0] * 50
+			y := medoidNode.Vector[1] * 50
+			posAttribute = fmt.Sprintf(" pos=\"%f,%f!\"", x, y)
+		}
+		// Make medoid bigger and red
+		sb.WriteString(fmt.Sprintf("  %d [fillcolor=red, width=1.0, label=\"%s\"%s];\n", medoidNode.ID, medoidLabel, posAttribute))
+	}
+
+	sb.WriteString("}\n")
+	return sb.String()
 }

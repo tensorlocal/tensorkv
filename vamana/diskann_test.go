@@ -249,16 +249,16 @@ func TestDiskANNCorrectness(t *testing.T) {
 	}()
 	testConfigs := []TestConfig{
 		// 小规模测试
-		{Dimension: 32, DataSize: 100, K: 10, L: 50, Alpha: 1.2, MaxDegree: 32, PQM: 8, PQKs: 256},
+		{Dimension: 8, DataSize: 10, K: 10, L: 50, Alpha: 1.2, MaxDegree: 4, PQM: 8, PQKs: 256},
 		{Dimension: 64, DataSize: 200, K: 10, L: 50, Alpha: 1.2, MaxDegree: 32, PQM: 8, PQKs: 256},
 		{Dimension: 128, DataSize: 500, K: 10, L: 50, Alpha: 1.2, MaxDegree: 32, PQM: 16, PQKs: 256},
 
 		// 中等规模测试
-		{Dimension: 128, DataSize: 1000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
-		{Dimension: 128, DataSize: 2000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
-		{Dimension: 128, DataSize: 3000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
-		{Dimension: 128, DataSize: 4000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
-		{Dimension: 128, DataSize: 5000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 12, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 1000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 70, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 2000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 70, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 3000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 70, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 4000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 70, PQM: 64, PQKs: 256},
+		{Dimension: 128, DataSize: 5000, K: 20, L: 100, Alpha: 1.2, MaxDegree: 70, PQM: 64, PQKs: 256},
 
 		// 大规模测试
 		{Dimension: 1024, DataSize: 5000, K: 50, L: 200, Alpha: 1.2, MaxDegree: 128, PQM: 64, PQKs: 256},

@@ -51,6 +51,8 @@ func (da *DiskANN) Build(vectors [][]float64, alpha float64, l int, k int) error
 	VamanaGraph := BuildVamanaGraphForShard(vectors, alpha, da.MaxDegree)
 
 	log.Printf("Finished build Graph %d", n)
+	//graph := VamanaGraph.GenerateDotGraphOptimized()
+	//os.WriteFile("a.dot", []byte(graph), 0644)
 
 	for _, node := range VamanaGraph.Nodes {
 		if _, ok := allEdges[node.ID]; !ok {
@@ -77,7 +79,7 @@ func (da *DiskANN) Build(vectors [][]float64, alpha float64, l int, k int) error
 	}
 
 	log.Println("DiskANN build completed successfully.")
-	
+
 	return nil
 }
 
